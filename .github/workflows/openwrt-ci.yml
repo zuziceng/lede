@@ -49,7 +49,7 @@ jobs:
           ./scripts/feeds install -a
 
       - name: Generate configuration file
-        run: make menuconfig
+        run: make oldconfig
 
       - name: Download packages
         run: make download -j16
