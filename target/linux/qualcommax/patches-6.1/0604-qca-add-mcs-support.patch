@@ -1,6 +1,6 @@
 --- a/include/linux/if_bridge.h
 +++ b/include/linux/if_bridge.h
-@@ -258,4 +258,17 @@ extern br_get_dst_hook_t __rcu *br_get_d
+@@ -260,4 +260,17 @@ extern br_get_dst_hook_t __rcu *br_get_d
  extern struct net_device *br_fdb_bridge_dev_get_and_hold(struct net_bridge *br);
  /* QCA NSS bridge-mgr support - End */
  
@@ -20,7 +20,7 @@
  #endif
 --- a/net/bridge/br_fdb.c
 +++ b/net/bridge/br_fdb.c
-@@ -263,7 +263,8 @@ static void fdb_notify(struct net_bridge
+@@ -259,7 +259,8 @@ static void fdb_notify(struct net_bridge
  		kfree_skb(skb);
  		goto errout;
  	}
@@ -30,7 +30,7 @@
  	return;
  errout:
  	rtnl_set_sk_err(net, RTNLGRP_NEIGH, err);
-@@ -329,6 +330,7 @@ struct net_bridge_fdb_entry *br_fdb_find
+@@ -325,6 +326,7 @@ struct net_bridge_fdb_entry *br_fdb_find
  {
  	return fdb_find_rcu(&br->fdb_hash_tbl, addr, vid);
  }
@@ -40,7 +40,7 @@
   * added to the bridge private HW address list and all required ports
 --- a/net/bridge/br_private.h
 +++ b/net/bridge/br_private.h
-@@ -906,6 +906,7 @@ void br_manage_promisc(struct net_bridge
+@@ -874,6 +874,7 @@ void br_manage_promisc(struct net_bridge
  int nbp_backup_change(struct net_bridge_port *p, struct net_device *backup_dev);
  
  /* br_input.c */
@@ -48,7 +48,7 @@
  int br_handle_frame_finish(struct net *net, struct sock *sk, struct sk_buff *skb);
  rx_handler_func_t *br_get_rx_handler(const struct net_device *dev);
  
-@@ -2271,4 +2272,14 @@ bool br_is_neigh_suppress_enabled(const
+@@ -2198,4 +2199,14 @@ struct nd_msg *br_is_nd_neigh_msg(struct
  #define __br_get(__hook, __default, __args ...) \
  		(__hook ? (__hook(__args)) : (__default))
  /* QCA NSS ECM support - End */
@@ -65,7 +65,7 @@
  #endif
 --- a/net/bridge/br_netlink.c
 +++ b/net/bridge/br_netlink.c
-@@ -656,6 +656,7 @@ void br_info_notify(int event, const str
+@@ -641,6 +641,7 @@ void br_info_notify(int event, const str
  		kfree_skb(skb);
  		goto errout;
  	}
@@ -75,7 +75,7 @@
  errout:
 --- a/net/bridge/br.c
 +++ b/net/bridge/br.c
-@@ -472,6 +472,12 @@ static void __exit br_deinit(void)
+@@ -471,6 +471,12 @@ static void __exit br_deinit(void)
  	br_fdb_fini();
  }
  
@@ -90,9 +90,9 @@
  MODULE_LICENSE("GPL");
 --- a/net/bridge/br_device.c
 +++ b/net/bridge/br_device.c
-@@ -83,6 +83,12 @@ netdev_tx_t br_dev_xmit(struct sk_buff *
+@@ -88,6 +88,12 @@ netdev_tx_t br_dev_xmit(struct sk_buff *
  	if (is_broadcast_ether_addr(dest)) {
- 		br_flood(br, skb, BR_PKT_BROADCAST, false, true, vid);
+ 		br_flood(br, skb, BR_PKT_BROADCAST, false, true);
  	} else if (is_multicast_ether_addr(dest)) {
 +		/* QCA qca-mcs support - Start */
 +		br_multicast_handle_hook_t *multicast_handle_hook = rcu_dereference(br_multicast_handle_hook);
@@ -101,13 +101,13 @@
 +		/* QCA qca-mcs support - End */
 +
  		if (unlikely(netpoll_tx_running(dev))) {
- 			br_flood(br, skb, BR_PKT_MULTICAST, false, true, vid);
+ 			br_flood(br, skb, BR_PKT_MULTICAST, false, true);
  			goto out;
 --- a/net/bridge/br_input.c
 +++ b/net/bridge/br_input.c
-@@ -23,6 +23,16 @@
- #include "br_private.h"
+@@ -24,6 +24,16 @@
  #include "br_private_tunnel.h"
+ #include "br_private_offload.h"
  
 +/* QCA qca-mcs support - Start */
 +/* Hook for external Multicast handler */
@@ -122,7 +122,7 @@
  static int
  br_netif_receive_skb(struct net *net, struct sock *sk, struct sk_buff *skb)
  {
-@@ -30,7 +40,7 @@ br_netif_receive_skb(struct net *net, st
+@@ -31,7 +41,7 @@ br_netif_receive_skb(struct net *net, st
  	return netif_receive_skb(skb);
  }
  
@@ -131,7 +131,7 @@
  {
  	struct net_device *indev, *brdev = BR_INPUT_SKB_CB(skb)->brdev;
  	struct net_bridge *br = netdev_priv(brdev);
-@@ -69,6 +79,7 @@ static int br_pass_frame_up(struct sk_bu
+@@ -72,6 +82,7 @@ static int br_pass_frame_up(struct sk_bu
  		       dev_net(indev), NULL, skb, indev, NULL,
  		       br_netif_receive_skb);
  }
@@ -139,7 +139,7 @@
  
  /* note: already called with rcu_read_lock */
  int br_handle_frame_finish(struct net *net, struct sock *sk, struct sk_buff *skb)
-@@ -84,6 +95,11 @@ int br_handle_frame_finish(struct net *n
+@@ -88,6 +99,11 @@ int br_handle_frame_finish(struct net *n
  	bool promisc;
  	u16 vid = 0;
  	u8 state;
@@ -151,7 +151,7 @@
  
  	if (!p)
  		goto drop;
-@@ -175,6 +191,11 @@ int br_handle_frame_finish(struct net *n
+@@ -164,6 +180,11 @@ int br_handle_frame_finish(struct net *n
  
  	switch (pkt_type) {
  	case BR_PKT_MULTICAST:
@@ -163,7 +163,7 @@
  		mdst = br_mdb_get(brmctx, skb, vid);
  		if ((mdst || BR_INPUT_SKB_CB_MROUTERS_ONLY(skb)) &&
  		    br_multicast_querier_exists(brmctx, eth_hdr(skb), mdst)) {
-@@ -190,8 +211,15 @@ int br_handle_frame_finish(struct net *n
+@@ -179,8 +200,15 @@ int br_handle_frame_finish(struct net *n
  		}
  		break;
  	case BR_PKT_UNICAST:
@@ -181,7 +181,7 @@
  	default:
  		break;
  	}
-@@ -206,6 +234,12 @@ int br_handle_frame_finish(struct net *n
+@@ -195,6 +223,12 @@ int br_handle_frame_finish(struct net *n
  			dst->used = now;
  		br_forward(dst->dst, skb, local_rcv, false);
  	} else {
@@ -196,7 +196,7 @@
  			br_flood(br, skb, pkt_type, local_rcv, false);
 --- a/include/linux/mroute.h
 +++ b/include/linux/mroute.h
-@@ -92,4 +92,44 @@ struct rtmsg;
+@@ -85,4 +85,44 @@ struct rtmsg;
  int ipmr_get_route(struct net *net, struct sk_buff *skb,
  		   __be32 saddr, __be32 daddr,
  		   struct rtmsg *rtm, u32 portid);
@@ -243,8 +243,8 @@
  #endif
 --- a/include/linux/mroute6.h
 +++ b/include/linux/mroute6.h
-@@ -137,4 +137,47 @@ static inline int ip6mr_sk_ioctl(struct
- 	return 1;
+@@ -110,4 +110,47 @@ static inline int ip6mr_sk_done(struct s
+ 	return 0;
  }
  #endif
 +
@@ -309,7 +309,7 @@
  #ifdef CONFIG_IP_MROUTE_MULTIPLE_TABLES
  #define ipmr_for_each_table(mrt, net)					\
  	list_for_each_entry_rcu(mrt, &net->ipv4.mr_tables, list,	\
-@@ -223,6 +232,228 @@ static int ipmr_rule_fill(struct fib_rul
+@@ -233,6 +242,228 @@ static int ipmr_rule_fill(struct fib_rul
  	return 0;
  }
  
@@ -538,7 +538,7 @@
  static const struct fib_rules_ops __net_initconst ipmr_rules_ops_template = {
  	.family		= RTNL_FAMILY_IPMR,
  	.rule_size	= sizeof(struct ipmr_rule),
-@@ -1192,6 +1423,11 @@ static int ipmr_mfc_delete(struct mr_tab
+@@ -1204,6 +1435,11 @@ static int ipmr_mfc_delete(struct mr_tab
  	mroute_netlink_event(mrt, c, RTM_DELROUTE);
  	mr_cache_put(&c->_c);
  
@@ -550,7 +550,7 @@
  	return 0;
  }
  
-@@ -1221,6 +1457,12 @@ static int ipmr_mfc_add(struct net *net,
+@@ -1233,6 +1469,12 @@ static int ipmr_mfc_add(struct net *net,
  		call_ipmr_mfc_entry_notifiers(net, FIB_EVENT_ENTRY_REPLACE, c,
  					      mrt->id);
  		mroute_netlink_event(mrt, c, RTM_NEWROUTE);
@@ -563,7 +563,7 @@
  		return 0;
  	}
  
-@@ -1281,6 +1523,7 @@ static void mroute_clean_tables(struct m
+@@ -1293,6 +1535,7 @@ static void mroute_clean_tables(struct m
  	struct net *net = read_pnet(&mrt->net);
  	struct mr_mfc *c, *tmp;
  	struct mfc_cache *cache;
@@ -571,7 +571,7 @@
  	LIST_HEAD(list);
  	int i;
  
-@@ -1305,10 +1548,19 @@ static void mroute_clean_tables(struct m
+@@ -1317,10 +1560,19 @@ static void mroute_clean_tables(struct m
  			rhltable_remove(&mrt->mfc_hash, &c->mnode, ipmr_rht_params);
  			list_del_rcu(&c->list);
  			cache = (struct mfc_cache *)c;
@@ -611,7 +611,7 @@
  #ifdef CONFIG_IPV6_MROUTE_MULTIPLE_TABLES
  #define ip6mr_for_each_table(mrt, net) \
  	list_for_each_entry_rcu(mrt, &net->ipv6.mr6_tables, list, \
-@@ -380,6 +391,227 @@ static struct mr_table_ops ip6mr_mr_tabl
+@@ -392,6 +403,227 @@ static struct mr_table_ops ip6mr_mr_tabl
  	.cmparg_any = &ip6mr_mr_table_ops_cmparg_any,
  };
  
@@ -839,7 +839,7 @@
  static struct mr_table *ip6mr_new_table(struct net *net, u32 id)
  {
  	struct mr_table *mrt;
-@@ -1221,6 +1453,7 @@ static int ip6mr_mfc_delete(struct mr_ta
+@@ -1235,6 +1467,7 @@ static int ip6mr_mfc_delete(struct mr_ta
  			    int parent)
  {
  	struct mfc6_cache *c;
@@ -847,7 +847,7 @@
  
  	/* The entries are added/deleted only under RTNL */
  	rcu_read_lock();
-@@ -1229,6 +1462,12 @@ static int ip6mr_mfc_delete(struct mr_ta
+@@ -1243,6 +1476,12 @@ static int ip6mr_mfc_delete(struct mr_ta
  	rcu_read_unlock();
  	if (!c)
  		return -ENOENT;
@@ -860,7 +860,7 @@
  	rhltable_remove(&mrt->mfc_hash, &c->_c.mnode, ip6mr_rht_params);
  	list_del_rcu(&c->_c.list);
  
-@@ -1236,6 +1475,12 @@ static int ip6mr_mfc_delete(struct mr_ta
+@@ -1250,6 +1489,12 @@ static int ip6mr_mfc_delete(struct mr_ta
  				       FIB_EVENT_ENTRY_DEL, c, mrt->id);
  	mr6_netlink_event(mrt, c, RTM_DELROUTE);
  	mr_cache_put(&c->_c);
@@ -873,7 +873,7 @@
  	return 0;
  }
  
-@@ -1457,6 +1702,12 @@ static int ip6mr_mfc_add(struct net *net
+@@ -1471,6 +1716,12 @@ static int ip6mr_mfc_add(struct net *net
  		call_ip6mr_mfc_entry_notifiers(net, FIB_EVENT_ENTRY_REPLACE,
  					       c, mrt->id);
  		mr6_netlink_event(mrt, c, RTM_NEWROUTE);
@@ -886,7 +886,7 @@
  		return 0;
  	}
  
-@@ -1519,6 +1770,10 @@ static int ip6mr_mfc_add(struct net *net
+@@ -1533,6 +1784,10 @@ static int ip6mr_mfc_add(struct net *net
  
  static void mroute_clean_tables(struct mr_table *mrt, int flags)
  {
@@ -897,7 +897,7 @@
  	struct mr_mfc *c, *tmp;
  	LIST_HEAD(list);
  	int i;
-@@ -1541,13 +1796,23 @@ static void mroute_clean_tables(struct m
+@@ -1555,13 +1810,23 @@ static void mroute_clean_tables(struct m
  			if (((c->mfc_flags & MFC_STATIC) && !(flags & MRT6_FLUSH_MFC_STATIC)) ||
  			    (!(c->mfc_flags & MFC_STATIC) && !(flags & MRT6_FLUSH_MFC)))
  				continue;
